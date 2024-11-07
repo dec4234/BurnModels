@@ -1,172 +1,232 @@
-// https://github.com/twistedfall/opencv-rust/issues/118#issuecomment-619608278
-
-use log::debug;
-use opencv::{
-    core::{self, Point, Scalar, Size, Vector},
-    imgcodecs,
-    imgproc::{self, bounding_rect, contour_area, find_contours, threshold, THRESH_BINARY},
-    prelude::*,
-    videoio::{self, VideoCapture, CAP_ANY},
-    Result
-};
-use opencv::types::{VectorOfVectorOfPoint, VectorOfi32};
-use simple_logger::SimpleLogger;
+use std::time::SystemTime;
+use burn::backend::{Autodiff, LibTorch, Wgpu};
+use burn::data::dataloader::batcher::Batcher;
+use burn::data::dataloader::DataLoaderBuilder;
+use burn::data::dataset::vision::{MnistDataset, MnistItem};
+use burn::nn::conv::{Conv2d, Conv2dConfig};
+use burn::nn::pool::{AdaptiveAvgPool2d, AdaptiveAvgPool2dConfig};
+use burn::nn::{Dropout, DropoutConfig, Linear, LinearConfig, Relu};
+use burn::nn::loss::CrossEntropyLossConfig;
+use burn::optim::AdamConfig;
+use burn::prelude::*;
+use burn::record::CompactRecorder;
+use burn::tensor::backend::AutodiffBackend;
+use burn::train::{ClassificationOutput, LearnerBuilder, TrainOutput, TrainStep, ValidStep};
+use burn::train::metric::{AccuracyMetric, CpuTemperature, CpuUse, CudaMetric, LossMetric};
+use burn_tch::LibTorchDevice;
 
 fn main() {
-    
+	assert!(
+		tch::utils::has_cuda(),
+		"Could not detect valid CUDA configuration"
+	);
+	//type Backend = Wgpu<f32, i32>;
+
+	let time = SystemTime::now();
+	
+	let device = LibTorchDevice::Cuda(0);
+
+	type LibTorchBackend = LibTorch;
+	type MyAutoDiffBackend = Autodiff<LibTorchBackend>;
+
+	let artifact_dir = "models/mnist_autodiff_libtorch";
+
+	train::<MyAutoDiffBackend>(artifact_dir, TrainingConfig::new(ModelConfig::new(10, 512), AdamConfig::new()), device.clone());
+	
+	println!("Time: {}", time.elapsed().unwrap().as_secs());
 }
 
-fn box_contours(mut out: Mat, mat: &Mat) -> Result<()> {
-    let mut contours = VectorOfVectorOfPoint::new();
-    find_contours(
-        &mat,
-        &mut contours,
-        imgproc::RETR_EXTERNAL,
-        imgproc::CHAIN_APPROX_SIMPLE,
-        Point::new(0, 0),
-    )?;
-
-    debug!("Found {} contours", contours.len());
-
-    for contour in contours.iter() {
-        let epsilon = 0.02 * imgproc::arc_length(&contour, true)?;
-        let mut approx = Mat::default();
-        imgproc::approx_poly_dp(&contour, &mut approx, epsilon, true)?;
-
-        let area = contour_area(&approx, false)?;
-
-        if area < 100.0 {
-            continue;
-        }
-
-        let rect = bounding_rect(&approx)?;
-
-        match approx.total() {
-            3 => {
-                debug!("Found triangle at {}, {}", rect.x, rect.y);
-            }
-            4 => {
-                debug!("Found square at {}, {}", rect.x, rect.y);
-            }
-            5 => {
-                debug!("Found pentagon at {}, {}", rect.x, rect.y);
-            }
-            12 => {
-                debug!("Found cross at {}, {}", rect.x, rect.y);
-            }
-            _ => {
-                debug!("Found contour with {} epsilons", approx.total());
-            }
-        }
-
-        imgproc::rectangle(
-            &mut out,
-            rect,
-            Scalar::new(66.0, 87.0, 245.0, 1.0), // Red bounding box
-            5,
-            imgproc::LINE_8,
-            0,
-        )?;
-    }
-
-    imgcodecs::imwrite("output.png", &out, &Vector::new())?;
-    
-    Ok(())
+#[derive(Debug, Module)]
+pub struct Model<B: Backend> {
+	conv1: Conv2d<B>,
+	conv2: Conv2d<B>,
+	pool: AdaptiveAvgPool2d,
+	dropout: Dropout,
+	linear1: Linear<B>,
+	linear2: Linear<B>,
+	activation: Relu,
 }
 
-#[test]
-fn test_filter_background() -> Result<()> {
-    SimpleLogger::new().init().unwrap();
-    
-    let frame = imgcodecs::imread("images/fake/simple.png", imgcodecs::IMREAD_COLOR)?;
-    let out = frame.clone();
+impl <B: Backend> Model<B> {
+	pub fn forward(&self, images: Tensor<B, 3>) -> Tensor<B, 2> {
+		let [batch_size, height, width] = images.dims();
 
-    let mut hsv = Mat::default();
-    imgproc::cvt_color(&frame, &mut hsv, imgproc::COLOR_BGR2HSV, 0)?;
+		let x = images.reshape([batch_size, 1, height, width]);
 
-    let mut green = Mat::default();
-    let lower_green = Scalar::new(35.0, 50.0, 50.0, 0.0); // Lower bound for green
-    let upper_green = Scalar::new(85.0, 255.0, 255.0, 0.0); // Upper bound for green
-    core::in_range(&hsv, &lower_green, &upper_green, &mut green)?;
-    
-    let mut yellow = Mat::default(); // TODO: what if the shape overlaps multiple background colors?
-    let lower_yellow = Scalar::new(20.0, 100.0, 100.0, 0.0); // Lower bound for yellow
-    let upper_yellow = Scalar::new(30.0, 255.0, 255.0, 0.0); // Upper bound for yellow
-    core::in_range(&hsv, &lower_yellow, &upper_yellow, &mut yellow)?;
-    
-    let mut mask = Mat::default();
-    core::bitwise_or(&green, &yellow, &mut mask, &core::no_array())?; // combine all color masks
+		let x= self.conv1.forward(x);
+		let x = self.dropout.forward(x);
+		let x = self.conv2.forward(x);
+		let x = self.dropout.forward(x);
+		let x = self.activation.forward(x);
 
-    let mut inv_mask = Mat::default();
-    core::bitwise_not(&mask, &mut inv_mask, &core::no_array())?; // invert to find objects of interest
+		let x = self.pool.forward(x);
+		let x = x.reshape([batch_size, 16 * 8 * 8]);
+		let x = self.linear1.forward(x);
+		let x= self.dropout.forward(x);
+		let x = self.activation.forward(x);
 
-    box_contours(out, &inv_mask)?;
-    Ok(())
+		self.linear2.forward(x)
+	}
 }
 
-#[test]
-fn test_filter_targets() -> Result<()> {
-    let img = imgcodecs::imread("images/real/1.png", imgcodecs::IMREAD_COLOR)?;
-    let out = img.clone();
+impl<B: Backend> Model<B> {
+	pub fn forward_classification(&self, images: Tensor<B, 3>, targets: Tensor<B, 1, Int>) -> ClassificationOutput<B> {
+		let output = self.forward(images);
 
-    // Convert the image to HSV
-    let mut hsv = Mat::default();
-    imgproc::cvt_color(&img, &mut hsv, imgproc::COLOR_BGR2HSV, 0)?;
+		let loss = CrossEntropyLossConfig::new().init(&output.device())
+			.forward(output.clone(), targets.clone());
 
-    // Define color ranges for red, orange, and blue
-    let lower_red1 = Scalar::new(0.0, 100.0, 100.0, 0.0);
-    let upper_red1 = Scalar::new(10.0, 255.0, 255.0, 0.0);
-
-    let lower_red2 = Scalar::new(160.0, 100.0, 100.0, 0.0);
-    let upper_red2 = Scalar::new(180.0, 255.0, 255.0, 0.0);
-
-    let lower_orange = Scalar::new(11.0, 100.0, 100.0, 0.0);
-    let upper_orange = Scalar::new(25.0, 255.0, 255.0, 0.0);
-
-    let lower_blue = Scalar::new(100.0, 150.0, 0.0, 0.0);
-    let upper_blue = Scalar::new(140.0, 255.0, 255.0, 0.0);
-    
-    let lower_white = Scalar::new(167.0, 174.0, 181.0, 0.0);
-    let upper_white = Scalar::new(256.0, 256.0, 256.0, 0.0);
-    
-    let lower_green = Scalar::new(170.0, 50.0, 0.0, 0.0); 
-    let upper_green = Scalar::new(255.0, 255.0, 0.0, 0.0);
-
-    // Create masks for each color
-    let mut mask_red1 = Mat::default();
-    let mut mask_red2 = Mat::default();
-    let mut mask_orange = Mat::default();
-    let mut mask_blue = Mat::default();
-    let mut mask_white = Mat::default();
-    let mut mask_green = Mat::default();
-
-    core::in_range(&hsv, &lower_red1, &upper_red1, &mut mask_red1)?;
-    core::in_range(&hsv, &lower_red2, &upper_red2, &mut mask_red2)?;
-    core::in_range(&hsv, &lower_orange, &upper_orange, &mut mask_orange)?;
-    core::in_range(&hsv, &lower_blue, &upper_blue, &mut mask_blue)?;
-    core::in_range(&hsv, &lower_white, &upper_white, &mut mask_white)?;
-    core::in_range(&hsv, &lower_green, &upper_green, &mut mask_green)?;
-
-    // Combine the red masks
-    let mut mask_red = Mat::default();
-    core::bitwise_or(&mask_red1, &mask_red2, &mut mask_red, &core::no_array())?;
-
-    // Combine all the masks
-    let mut mask_combined = Mat::default();
-    core::bitwise_or(&mask_red, &mask_orange, &mut mask_combined, &core::no_array())?;
-    core::bitwise_or(&mask_combined.clone(), &mask_white, &mut mask_combined, &core::no_array())?;
-    core::bitwise_or(&mask_combined.clone(), &mask_blue, &mut mask_combined, &core::no_array())?;
-    core::bitwise_or(&mask_combined.clone(), &mask_green, &mut mask_combined, &core::no_array())?;
-
-    // Apply the mask to the original image to extract the shapes
-    let mut result = Mat::default();
-    core::bitwise_and(&img, &img, &mut result, &mask_combined)?;
-    
-    let mut gray = Mat::default();
-    imgproc::cvt_color(&result, &mut gray, imgproc::COLOR_BGR2GRAY, 0)?;
-    
-    box_contours(out, &gray)?;
-    
-    Ok(())
+		ClassificationOutput::new(loss, output, targets)
+	}
 }
 
+impl <B: AutodiffBackend> TrainStep<MnistBatch<B>, ClassificationOutput<B>> for Model<B> {
+	fn step(&self, batch: MnistBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
+		let item = self.forward_classification(batch.images, batch.targets);
+
+		TrainOutput::new(self, item.loss.backward(), item)
+	}
+}
+
+impl<B: Backend> ValidStep<MnistBatch<B>, ClassificationOutput<B>> for Model<B> {
+	fn step(&self, batch: MnistBatch<B>) -> ClassificationOutput<B> {
+		self.forward_classification(batch.images, batch.targets)
+	}
+}
+
+#[derive(Debug, Config)]
+pub struct ModelConfig {
+	num_classes: usize,
+	hidden_size: usize,
+	#[config(default = 0.5)]
+	dropout: f64,
+}
+
+impl ModelConfig {
+	pub fn init<B: Backend>(&self, device: &B::Device) -> Model<B> {
+		Model {
+			conv1: Conv2dConfig::new([1, 8], [3, 3]).init(device),
+			conv2: Conv2dConfig::new([8, 16], [3, 3]).init(device),
+			pool: AdaptiveAvgPool2dConfig::new([8, 8]).init(),
+			activation: Relu::new(),
+			linear1: LinearConfig::new(16 * 8 * 8, self.hidden_size).init(device),
+			linear2: LinearConfig::new(self.hidden_size, self.num_classes).init(device),
+			dropout: DropoutConfig::new(self.dropout).init(),
+		}
+	}
+}
+
+#[derive(Clone)]
+pub struct MnistBatcher<B: Backend> {
+	device: B::Device
+}
+
+impl <B: Backend> MnistBatcher<B> {
+	pub fn new(device: B::Device) -> Self {
+		Self { device }
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct MnistBatch<B: Backend> {
+	pub images: Tensor<B, 3>,
+	pub targets: Tensor<B, 1, Int>,
+}
+
+impl <B: Backend> Batcher<MnistItem, MnistBatch<B>> for MnistBatcher<B> {
+	fn batch(&self, items: Vec<MnistItem>) -> MnistBatch<B> {
+		let images = items
+			.iter()
+			.map(|item| TensorData::from(item.image).convert::<B::FloatElem>())
+			.map(|data| Tensor::<B, 2>::from_data(data, &self.device))
+			.map(|tensor| tensor.reshape([1, 28, 28]))
+			.map(|tensor| ((tensor / 255) - 0.1307) / 0.3081)
+			.collect();
+
+		let targets = items
+			.iter()
+			.map(|item| {
+				Tensor::<B, 1, Int>::from_data(
+					[(item.label as i64).elem::<B::IntElem>()],
+					&self.device,
+				)
+			})
+			.collect();
+
+		let images = Tensor::cat(images, 0).to_device(&self.device);
+		let targets = Tensor::cat(targets, 0).to_device(&self.device);
+
+		MnistBatch { images, targets }
+	}
+}
+
+#[derive(Config)]
+pub struct TrainingConfig {
+	pub model: ModelConfig,
+	pub optimizer: AdamConfig,
+	#[config(default = 10)]
+	pub num_epochs: usize,
+	#[config(default = 64)]
+	pub batch_size: usize,
+	#[config(default = 4)]
+	pub num_workers: usize,
+	#[config(default = 42)]
+	pub seed: u64,
+	#[config(default = 1.0e-4)]
+	pub learning_rate: f64,
+}
+
+fn create_artifact_dir(artifact_dir: &str) {
+	// Remove existing artifacts before to get an accurate learner summary
+	std::fs::remove_dir_all(artifact_dir).ok();
+	std::fs::create_dir_all(artifact_dir).ok();
+}
+
+pub fn train<B: AutodiffBackend>(artifact_dir: &str, config: TrainingConfig, device: B::Device) {
+	create_artifact_dir(artifact_dir);
+	config
+		.save(format!("{artifact_dir}/config.json"))
+		.expect("Config should be saved successfully");
+
+	B::seed(config.seed);
+
+	let batcher_train = MnistBatcher::<B>::new(device.clone());
+	let batcher_valid = MnistBatcher::<B::InnerBackend>::new(device.clone());
+
+	let dataloader_train = DataLoaderBuilder::new(batcher_train)
+		.batch_size(config.batch_size)
+		.shuffle(config.seed)
+		.num_workers(config.num_workers)
+		.build(MnistDataset::train());
+
+	let dataloader_test = DataLoaderBuilder::new(batcher_valid)
+		.batch_size(config.batch_size)
+		.shuffle(config.seed)
+		.num_workers(config.num_workers)
+		.build(MnistDataset::test());
+
+	let learner = LearnerBuilder::new(artifact_dir)
+		.metric_train_numeric(AccuracyMetric::new())
+		.metric_valid_numeric(AccuracyMetric::new())
+		.metric_train_numeric(LossMetric::new())
+		.metric_valid_numeric(LossMetric::new())
+
+		.metric_train(CudaMetric::new())
+		.metric_train(CpuUse::new())
+
+		.with_file_checkpointer(CompactRecorder::new())
+		.devices(vec![device.clone()])
+		.num_epochs(config.num_epochs)
+		.summary()
+		.build(
+			config.model.init::<B>(&device),
+			config.optimizer.init(),
+			config.learning_rate,
+		);
+
+	let model_trained = learner.fit(dataloader_train, dataloader_test);
+
+	model_trained
+		.save_file(format!("{artifact_dir}/model"), &CompactRecorder::new())
+		.expect("Trained model should be saved successfully");
+}
