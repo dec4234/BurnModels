@@ -1,14 +1,5 @@
-[package]
-name = "uascv25"
-version = "0.1.0"
-edition = "2021"
+[workspace]
 
-[dependencies]
-anyhow = "1.0.87"
-simple_logger = "5.0.0"
-log = "0.4.22"
-tokio = {version = "1.40.0", features = ["full"]}
-burn = {version = "0.15.0", features = ["default", "vision", "train", "wgpu","tch", "metrics", "cuda-jit"]}
-burn-cuda = {version = "0.15.0", features = ["default"]}
-burn-tch = {version = "0.15.0", features = ["default"]}
-tch = {version = "0.15.0", features = ["download-libtorch"]}
+members = ["crates/*"]
+
+workspace.resolver = "2"

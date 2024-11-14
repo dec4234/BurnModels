@@ -1,39 +1,54 @@
-use std::time::SystemTime;
-use burn::backend::{Autodiff, LibTorch, Wgpu};
+use burn::backend::{Autodiff, LibTorch};
 use burn::data::dataloader::batcher::Batcher;
 use burn::data::dataloader::DataLoaderBuilder;
 use burn::data::dataset::vision::{MnistDataset, MnistItem};
 use burn::nn::conv::{Conv2d, Conv2dConfig};
+use burn::nn::loss::CrossEntropyLossConfig;
 use burn::nn::pool::{AdaptiveAvgPool2d, AdaptiveAvgPool2dConfig};
 use burn::nn::{Dropout, DropoutConfig, Linear, LinearConfig, Relu};
-use burn::nn::loss::CrossEntropyLossConfig;
 use burn::optim::AdamConfig;
 use burn::prelude::*;
-use burn::record::CompactRecorder;
+use burn::record::{CompactRecorder, Recorder};
 use burn::tensor::backend::AutodiffBackend;
+use burn::train::metric::{AccuracyMetric, CpuUse, CudaMetric, LossMetric};
 use burn::train::{ClassificationOutput, LearnerBuilder, TrainOutput, TrainStep, ValidStep};
-use burn::train::metric::{AccuracyMetric, CpuTemperature, CpuUse, CudaMetric, LossMetric};
 use burn_tch::LibTorchDevice;
+use std::time::SystemTime;
+use burn::data::dataset::Dataset;
+use burn::lr_scheduler::exponential::ExponentialLrSchedulerConfig;
+use burn::lr_scheduler::linear::LinearLrSchedulerConfig;
+
+type LibTorchBackend = LibTorch;
+type MyAutoDiffBackend = Autodiff<LibTorchBackend>;
+
+const ARTIFACT_DIR: &str = "models/mnist_autodiff_libtorch";
+
+// https://observablehq.com/@davidalber/mnist-viewer
+#[test]
+#[ignore]
+fn infer_something() {
+	assert!(tch::utils::has_cuda(), "Could not detect valid CUDA configuration");
+
+	let time = SystemTime::now();
+
+	let device = LibTorchDevice::Cuda(0);
+
+	// where 42 is the id of the test image
+	infer::<MyAutoDiffBackend>(ARTIFACT_DIR, device, MnistDataset::test().get(42).unwrap());
+	
+	println!("Time to infer: {}", time.elapsed().unwrap().as_millis() as f64 / 1000.0);
+}
 
 fn main() {
-	assert!(
-		tch::utils::has_cuda(),
-		"Could not detect valid CUDA configuration"
-	);
-	//type Backend = Wgpu<f32, i32>;
+	assert!(tch::utils::has_cuda(), "Could not detect valid CUDA configuration");
 
 	let time = SystemTime::now();
 	
 	let device = LibTorchDevice::Cuda(0);
-
-	type LibTorchBackend = LibTorch;
-	type MyAutoDiffBackend = Autodiff<LibTorchBackend>;
-
-	let artifact_dir = "models/mnist_autodiff_libtorch";
-
-	train::<MyAutoDiffBackend>(artifact_dir, TrainingConfig::new(ModelConfig::new(10, 512), AdamConfig::new()), device.clone());
 	
-	println!("Time: {}", time.elapsed().unwrap().as_secs());
+	train::<MyAutoDiffBackend>(ARTIFACT_DIR, TrainingConfig::new(ModelConfig::new(10, 512), AdamConfig::new()), device.clone());
+	
+	println!("Time to train: {}", time.elapsed().unwrap().as_millis() as f64 / 1000.0);
 }
 
 #[derive(Debug, Module)]
@@ -67,9 +82,7 @@ impl <B: Backend> Model<B> {
 
 		self.linear2.forward(x)
 	}
-}
 
-impl<B: Backend> Model<B> {
 	pub fn forward_classification(&self, images: Tensor<B, 3>, targets: Tensor<B, 1, Int>) -> ClassificationOutput<B> {
 		let output = self.forward(images);
 
@@ -213,6 +226,7 @@ pub fn train<B: AutodiffBackend>(artifact_dir: &str, config: TrainingConfig, dev
 
 		.metric_train(CudaMetric::new())
 		.metric_train(CpuUse::new())
+		.metric_train(AccuracyMetric::new())
 
 		.with_file_checkpointer(CompactRecorder::new())
 		.devices(vec![device.clone()])
@@ -221,7 +235,7 @@ pub fn train<B: AutodiffBackend>(artifact_dir: &str, config: TrainingConfig, dev
 		.build(
 			config.model.init::<B>(&device),
 			config.optimizer.init(),
-			config.learning_rate,
+			ExponentialLrSchedulerConfig::new(config.learning_rate, 0.999999).init(),
 		);
 
 	let model_trained = learner.fit(dataloader_train, dataloader_test);
@@ -229,4 +243,19 @@ pub fn train<B: AutodiffBackend>(artifact_dir: &str, config: TrainingConfig, dev
 	model_trained
 		.save_file(format!("{artifact_dir}/model"), &CompactRecorder::new())
 		.expect("Trained model should be saved successfully");
+}
+
+pub fn infer<B: Backend>(artifact_dir: &str, device: B::Device, item: MnistItem) {
+	let config = TrainingConfig::load(format!("{artifact_dir}/config.json")).unwrap();
+	let record = CompactRecorder::new().load(format!("{artifact_dir}/model").into(), &device).unwrap();
+
+	let model = config.model.init::<B>(&device).load_record(record);
+
+	let label = item.label;
+	let batcher = MnistBatcher::<B>::new(device.clone());
+	let batch = batcher.batch(vec![item]);
+	let output = model.forward(batch.images);
+	let predicted = output.argmax(1).flatten::<1>(0, 1).into_scalar();
+	
+	println!("Label: {}, Predicted: {}", label, predicted);
 }
