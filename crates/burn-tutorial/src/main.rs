@@ -1,7 +1,10 @@
+use std::path::Path;
 use burn::backend::{Autodiff, LibTorch};
 use burn::data::dataloader::batcher::Batcher;
 use burn::data::dataloader::DataLoaderBuilder;
 use burn::data::dataset::vision::{MnistDataset, MnistItem};
+use burn::data::dataset::Dataset;
+use burn::lr_scheduler::exponential::ExponentialLrSchedulerConfig;
 use burn::nn::conv::{Conv2d, Conv2dConfig};
 use burn::nn::loss::CrossEntropyLossConfig;
 use burn::nn::pool::{AdaptiveAvgPool2d, AdaptiveAvgPool2dConfig};
@@ -14,14 +17,12 @@ use burn::train::metric::{AccuracyMetric, CpuUse, CudaMetric, LossMetric};
 use burn::train::{ClassificationOutput, LearnerBuilder, TrainOutput, TrainStep, ValidStep};
 use burn_tch::LibTorchDevice;
 use std::time::SystemTime;
-use burn::data::dataset::Dataset;
-use burn::lr_scheduler::exponential::ExponentialLrSchedulerConfig;
-use burn::lr_scheduler::linear::LinearLrSchedulerConfig;
 
 type LibTorchBackend = LibTorch;
 type MyAutoDiffBackend = Autodiff<LibTorchBackend>;
 
-const ARTIFACT_DIR: &str = "models/mnist_autodiff_libtorch";
+// this path should only be used from within a MAIN function; tests have a path specific to the crate that they are from
+const ARTIFACT_DIR: &str = "crates/burn-tutorial/models/mnist_autodiff_libtorch";
 
 // https://observablehq.com/@davidalber/mnist-viewer
 #[test]
@@ -32,9 +33,9 @@ fn infer_something() {
 	let time = SystemTime::now();
 
 	let device = LibTorchDevice::Cuda(0);
-
+	
 	// where 42 is the id of the test image
-	infer::<MyAutoDiffBackend>(ARTIFACT_DIR, device, MnistDataset::test().get(42).unwrap());
+	infer::<MyAutoDiffBackend, &str>("models/mnist_autodiff_libtorch", device, MnistDataset::test().get(42).unwrap());
 	
 	println!("Time to infer: {}", time.elapsed().unwrap().as_millis() as f64 / 1000.0);
 }
@@ -245,9 +246,13 @@ pub fn train<B: AutodiffBackend>(artifact_dir: &str, config: TrainingConfig, dev
 		.expect("Trained model should be saved successfully");
 }
 
-pub fn infer<B: Backend>(artifact_dir: &str, device: B::Device, item: MnistItem) {
-	let config = TrainingConfig::load(format!("{artifact_dir}/config.json")).unwrap();
-	let record = CompactRecorder::new().load(format!("{artifact_dir}/model").into(), &device).unwrap();
+pub fn infer<B: Backend, P: AsRef<Path>>(artifact_dir: P, device: B::Device, item: MnistItem) {
+	let artifact_dir = artifact_dir.as_ref().to_str().unwrap().to_string();
+	let model_dir = format!("{}/model", artifact_dir);
+	let artifact_dir = format!("{}/config.json", artifact_dir);
+	
+	let config = TrainingConfig::load(artifact_dir).unwrap();
+	let record = CompactRecorder::new().load(model_dir.parse().unwrap(), &device).unwrap();
 
 	let model = config.model.init::<B>(&device).load_record(record);
 
