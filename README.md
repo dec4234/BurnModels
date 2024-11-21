@@ -1,6 +1,3 @@
-# uascv 2025
+# Burn models
 
-## Installation
-See https://github.com/twistedfall/opencv-rust/blob/master/INSTALL.md and https://github.com/twistedfall/opencv-rust/issues/118#issuecomment-619608278
-
-You will need to install Rust as well https://www.rust-lang.org/tools/install
+A set of ML models implemented in Burn which is analogous to PyTorch but in Rust
