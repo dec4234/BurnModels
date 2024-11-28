@@ -1,16 +1,16 @@
+use crate::data::GymBatch;
 use burn::config::Config;
 use burn::module::Module;
-use burn::nn::{Linear, LinearConfig, Relu};
-use burn::nn::loss::{BinaryCrossEntropyLossConfig, CrossEntropyLossConfig, MseLoss};
 use burn::nn::loss::Reduction::Mean;
+use burn::nn::loss::{CrossEntropyLossConfig, MseLoss};
+use burn::nn::{Linear, LinearConfig, Relu};
 use burn::prelude::Backend;
-use burn::tensor::{Int, Tensor};
 use burn::tensor::backend::AutodiffBackend;
-use burn::train::{RegressionOutput, TrainOutput, TrainStep};
-use crate::data::GymBatch;
+use burn::tensor::Tensor;
+use burn::train::{RegressionOutput, TrainOutput, TrainStep, ValidStep};
 // https://github.com/tracel-ai/burn/blob/main/examples/simple-regression/src/model.rs
 
-const NUM_FEATURES: usize = 15;
+const NUM_FEATURES: usize = 14;
 
 #[derive(Debug, Module)]
 pub struct WeightModel<B: Backend> {
@@ -20,7 +20,7 @@ pub struct WeightModel<B: Backend> {
 }
 
 impl <B: Backend> WeightModel<B> {
-	pub fn forward(&self, input: Tensor<B, 1>) -> Tensor<B, 1> {
+	pub fn forward(&self, input: Tensor<B, 2>) -> Tensor<B, 2> {
 		let x = self.input.forward(input);
 		let x = self.activation.forward(x);
 		self.output.forward(x)
@@ -29,7 +29,7 @@ impl <B: Backend> WeightModel<B> {
 	pub fn forward_step(&self, item: GymBatch<B>) -> RegressionOutput<B> {
 		let targets: Tensor<B, 2> = item.targets.unsqueeze_dim(1);
 		let output: Tensor<B, 2> = self.forward(item.inputs);
-
+		
 		let loss = MseLoss::new().forward(output.clone(), targets.clone(), Mean);
 
 		RegressionOutput {
@@ -42,7 +42,15 @@ impl <B: Backend> WeightModel<B> {
 
 impl <B: AutodiffBackend> TrainStep<GymBatch<B>, RegressionOutput<B>> for WeightModel<B> {
 	fn step(&self, item: GymBatch<B>) -> TrainOutput<RegressionOutput<B>> {
-		let item = self.forward_regression(item);
+		let item = self.forward_step(item);
+
+		TrainOutput::new(self, item.loss.backward(), item)
+	}
+}
+
+impl<B: Backend> ValidStep<GymBatch<B>, RegressionOutput<B>> for WeightModel<B> {
+	fn step(&self, batch: GymBatch<B>) -> RegressionOutput<B> {
+		self.forward_step(batch)
 	}
 }
 
