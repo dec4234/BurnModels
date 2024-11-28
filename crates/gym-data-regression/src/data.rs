@@ -4,6 +4,7 @@ use burn::data::dataloader::Dataset;
 use burn::prelude::Backend;
 use burn::tensor::Tensor;
 use serde::{Deserialize, Serialize};
+use crate::model;
 
 #[derive(Debug, Clone)]
 pub struct GymNormalizer<B: Backend> {
@@ -42,10 +43,19 @@ impl <B: Backend> GymBatcher<B> {
 	pub fn new(device: B::Device, dataset: &GymDataset) -> Self {
 		let min = dataset.min_per_category();
 		let max = dataset.max_per_category();
+		// println!("Min: {:?}", min); // Needed to precompute min and max for inference
+		// println!("Max: {:?}", max);
 
 		Self {
 			device: device.clone(),
 			normalizer: GymNormalizer::new_from_slice(&device, &min, &max)
+		}
+	}
+	
+	pub fn new_from_precomputed(device: B::Device, min: &[f32], max: &[f32]) -> Self {
+		Self {
+			device: device.clone(),
+			normalizer: GymNormalizer::new_from_slice(&device, min, max)
 		}
 	}
 }
@@ -58,20 +68,20 @@ impl <B: Backend> Batcher<GymGoer, GymBatch<B>> for GymBatcher<B> {
 			let input = Tensor::<B, 1>::from_floats(
 				[
 				item.age as f32,
-				item.gender.into(),
+				// item.gender.into(),
 				//item.weight,
 				item.height,
-				item.max_bpm as f32,
-				item.average_bpm as f32,
-				item.resting_bpm as f32,
-				item.session_duration,
-				item.calories_burned,
-				item.workout_type.into(),
-				item.fat_percentage,
-				item.water_intake,
-				item.workout_frequency as f32,
-				item.experience_level as f32,
-				item.bmi
+				// item.max_bpm as f32,
+				// item.average_bpm as f32,
+				// item.resting_bpm as f32,
+				// item.session_duration,
+				// item.calories_burned,
+				// item.workout_type.into(),
+				// item.fat_percentage,
+				// item.water_intake,
+				// item.workout_frequency as f32,
+				// item.experience_level as f32,
+				// item.bmi
 			],
 			&self.device);
 
@@ -132,48 +142,50 @@ impl GymDataset {
 	}
 
 	pub fn min_per_category(&self) -> Vec<f32> {
-		let mut min = vec![f32::MAX; 14];
+		let mut min = vec![f32::MAX; model::NUM_FEATURES];
 
 		for goer in &self.data {
+			min[1] = min[1].min(goer.height);
 			min[0] = min[0].min(goer.age as f32);
-			// skip gender since its a binary value
-			//min[2] = min[2].min(goer.weight);
-			min[2] = min[2].min(goer.height);
-			min[3] = min[3].min(goer.max_bpm as f32);
-			min[4] = min[4].min(goer.average_bpm as f32);
-			min[5] = min[5].min(goer.resting_bpm as f32);
-			min[6] = min[6].min(goer.session_duration);
-			min[7] = min[7].min(goer.calories_burned);
-			// skip workout type since its a categorical value
-			min[9] = min[9].min(goer.fat_percentage);
-			min[10] = min[10].min(goer.water_intake);
-			min[11] = min[11].min(goer.workout_frequency as f32);
-			min[12] = min[12].min(goer.experience_level as f32);
-			min[13] = min[13].min(goer.bmi);
+			// // skip gender since its a binary value
+			// //min[2] = min[2].min(goer.weight); // originally ignored
+			// min[2] = min[2].min(goer.height);
+			// min[3] = min[3].min(goer.max_bpm as f32);
+			// min[4] = min[4].min(goer.average_bpm as f32);
+			// min[5] = min[5].min(goer.resting_bpm as f32);
+			// min[6] = min[6].min(goer.session_duration);
+			// min[7] = min[7].min(goer.calories_burned);
+			// // skip workout type since its a categorical value
+			// min[9] = min[9].min(goer.fat_percentage);
+			// min[10] = min[10].min(goer.water_intake);
+			// min[11] = min[11].min(goer.workout_frequency as f32);
+			// min[12] = min[12].min(goer.experience_level as f32);
+			// min[13] = min[13].min(goer.bmi);
 		}
 
 		min
 	}
 
 	pub fn max_per_category(&self) -> Vec<f32> {
-		let mut max = vec![f32::MIN; 14];
+		let mut max = vec![f32::MIN; model::NUM_FEATURES];
 
 		for goer in &self.data {
+			max[1] = max[1].max(goer.height);
 			max[0] = max[0].max(goer.age as f32);
-			max[1] = 1.0;
-			// max[2] = max[2].max(goer.weight);
-			max[2] = max[2].max(goer.height);
-			max[3] = max[3].max(goer.max_bpm as f32);
-			max[4] = max[4].max(goer.average_bpm as f32);
-			max[5] = max[5].max(goer.resting_bpm as f32);
-			max[6] = max[6].max(goer.session_duration);
-			max[7] = max[7].max(goer.calories_burned);
-			max[8] = 3.0;
-			max[9] = max[9].max(goer.fat_percentage);
-			max[10] = max[10].max(goer.water_intake);
-			max[11] = max[11].max(goer.workout_frequency as f32);
-			max[12] = max[12].max(goer.experience_level as f32);
-			max[13] = max[13].max(goer.bmi);
+			// max[1] = 1.0;
+			// // max[2] = max[2].max(goer.weight); // originally ignored
+			// max[2] = max[2].max(goer.height);
+			// max[3] = max[3].max(goer.max_bpm as f32);
+			// max[4] = max[4].max(goer.average_bpm as f32);
+			// max[5] = max[5].max(goer.resting_bpm as f32);
+			// max[6] = max[6].max(goer.session_duration);
+			// max[7] = max[7].max(goer.calories_burned);
+			// max[8] = 3.0;
+			// max[9] = max[9].max(goer.fat_percentage);
+			// max[10] = max[10].max(goer.water_intake);
+			// max[11] = max[11].max(goer.workout_frequency as f32);
+			// max[12] = max[12].max(goer.experience_level as f32);
+			// max[13] = max[13].max(goer.bmi);
 		}
 
 		max
@@ -242,6 +254,28 @@ impl From<[f32; 15]> for GymGoer {
 			workout_frequency: value[12] as u8,
 			experience_level: value[13] as u8,
 			bmi: value[14],
+		}
+	}
+}
+
+impl Default for GymGoer {
+	fn default() -> Self {
+		Self {
+			age: 20,
+			gender: Gender::Male,
+			weight: 68.03,
+			height: 1.778,
+			max_bpm: 164,
+			average_bpm: 137,
+			resting_bpm: 68,
+			session_duration: 38.0,
+			calories_burned: 167.0,
+			workout_type: WorkoutType::Cardio,
+			fat_percentage: 12.0,
+			water_intake: 2.1,
+			workout_frequency: 4,
+			experience_level: 3,
+			bmi: 20.0,
 		}
 	}
 }

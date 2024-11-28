@@ -1,18 +1,22 @@
+use crate::data::{GymBatcher, GymDataset};
+use crate::model::WeightModelConfig;
 use burn::config::Config;
 use burn::data::dataloader::DataLoaderBuilder;
 use burn::data::dataset::Dataset;
+use burn::lr_scheduler::exponential::ExponentialLrSchedulerConfig;
+use burn::lr_scheduler::linear::LinearLrSchedulerConfig;
 use burn::optim::AdamConfig;
 use burn::prelude::Module;
-use burn::record::{CompactRecorder, NoStdTrainingRecorder};
+use burn::record::CompactRecorder;
 use burn::tensor::backend::AutodiffBackend;
+use burn::train::metric::{CpuUse, CudaMetric, LossMetric};
 use burn::train::LearnerBuilder;
-use burn::train::metric::{AccuracyMetric, CpuUse, CudaMetric, LossMetric};
-use crate::data::{GymBatcher, GymDataset};
-use crate::model::WeightModelConfig;
 
 #[derive(Config)]
 pub struct TrainingConfig {
-	#[config(default = 100)]
+	pub model: WeightModelConfig,
+	
+	#[config(default = 400)]
 	pub num_epochs: usize,
 
 	#[config(default = 2)]
@@ -25,6 +29,9 @@ pub struct TrainingConfig {
 
 	#[config(default = 256)]
 	pub batch_size: usize,
+	
+	#[config(default = 1.0e-1)]
+	pub learning_rate: f64,
 }
 
 fn create_artifact_dir(artifact_dir: &str) {
@@ -38,8 +45,9 @@ pub fn run<B: AutodiffBackend>(artifact_dir: &str, device: B::Device) {
 
 	// Config
 	let optimizer = AdamConfig::new();
-	let config = TrainingConfig::new(optimizer);
-	let model = WeightModelConfig::new().init(&device);
+	let model = WeightModelConfig::new();
+	let config = TrainingConfig::new(model.clone(), optimizer);
+	let model = model.init(&device);
 	B::seed(config.seed);
 	
 	let dataset = GymDataset::from("crates/gym-data-regression/gym_members_exercise_tracking.csv");
@@ -79,7 +87,8 @@ pub fn run<B: AutodiffBackend>(artifact_dir: &str, device: B::Device) {
 		.devices(vec![device.clone()])
 		.num_epochs(config.num_epochs)
 		.summary()
-		.build(model, config.optimizer.init(), 1e-3);
+		.build(model, config.optimizer.init(), 
+			   LinearLrSchedulerConfig::new(config.learning_rate, config.learning_rate * 1e-10, 1700).init());
 
 	let model_trained = learner.fit(dataloader_train, dataloader_test);
 
@@ -88,9 +97,6 @@ pub fn run<B: AutodiffBackend>(artifact_dir: &str, device: B::Device) {
 		.unwrap();
 
 	model_trained
-		.save_file(
-			format!("{artifact_dir}/model"),
-			&NoStdTrainingRecorder::new(),
-		)
+		.save_file(format!("{artifact_dir}/model"), &CompactRecorder::new())
 		.expect("Failed to save trained model");
 }

@@ -10,7 +10,7 @@ use burn::tensor::Tensor;
 use burn::train::{RegressionOutput, TrainOutput, TrainStep, ValidStep};
 // https://github.com/tracel-ai/burn/blob/main/examples/simple-regression/src/model.rs
 
-const NUM_FEATURES: usize = 14;
+pub const NUM_FEATURES: usize = 2; // TODO: change back to 14
 
 #[derive(Debug, Module)]
 pub struct WeightModel<B: Backend> {
