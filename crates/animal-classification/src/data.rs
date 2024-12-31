@@ -139,7 +139,7 @@ pub struct AnimalBatch<B: Backend> {
 	pub targets: Tensor<B, 1, Int>,
 }
 
-impl <B: Backend> Batcher<AnimalImage<B>, AnimalBatch<B>> for AnimalBatcher<B> {
+/*impl <B: Backend> Batcher<AnimalImage<B>, AnimalBatch<B>> for AnimalBatcher<B> {
 	fn batch(&self, items: Vec<AnimalImage<B>>) -> AnimalBatch<B> {
 		let images = items
 			.iter()
@@ -167,4 +167,4 @@ impl <B: Backend> Batcher<AnimalImage<B>, AnimalBatch<B>> for AnimalBatcher<B> {
 			targets 
 		}
 	}
-}
+}*/

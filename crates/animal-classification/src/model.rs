@@ -52,7 +52,7 @@ impl <B: Backend> AnimalClassModel<B> {
 	}
 }
 
-impl <B: AutodiffBackend> TrainStep<AnimalBatch<B>, ClassificationOutput<B>> for AnimalClassModel<B> {
+/*impl <B: AutodiffBackend> TrainStep<AnimalBatch<B>, ClassificationOutput<B>> for AnimalClassModel<B> {
 	fn step(&self, batch: AnimalBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
 		let item = self.forward_classification(batch.images, batch.targets);
 
@@ -64,7 +64,7 @@ impl<B: Backend> ValidStep<AnimalBatch<B>, ClassificationOutput<B>> for AnimalCl
 	fn step(&self, batch: AnimalBatch<B>) -> ClassificationOutput<B> {
 		self.forward_classification(batch.images, batch.targets)
 	}
-}
+}*/
 
 #[derive(Debug, Config)]
 pub struct AnimalClassConfig {
