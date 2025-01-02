@@ -12,3 +12,4 @@ tch = {version = "0.15.0", features = ["download-libtorch"]}
 image = {version = "0.25.5", features = ["default"]}
 thiserror = "2.0.9"
 rand = {version = "0.8.5", features = ["default"]}
+rayon = "1.10.0"

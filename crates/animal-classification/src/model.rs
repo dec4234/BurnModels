@@ -7,7 +7,6 @@ use burn::nn::pool::{AdaptiveAvgPool2d, AdaptiveAvgPool2dConfig};
 use burn::prelude::{Backend, Int, Tensor};
 use burn::tensor::backend::AutodiffBackend;
 use burn::train::{ClassificationOutput, TrainOutput, TrainStep, ValidStep};
-use crate::data::AnimalBatch;
 
 #[derive(Debug, Module)]
 pub struct AnimalClassModel<B: Backend> {

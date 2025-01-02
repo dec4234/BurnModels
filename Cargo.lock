@@ -79,6 +79,7 @@ dependencies = [
  "image",
  "log",
  "rand",
+ "rayon",
  "simple_logger",
  "tch",
  "thiserror 2.0.9",
