@@ -9,6 +9,9 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::ops::AddAssign;
 use std::sync::{Arc, Mutex};
 
+pub const SIDE_LENGTH: u32 = 242;
+pub const ARTIFACT_DIR: &str = "/tmp/animal-classifier";
+
 pub trait AnimalClassDataset {
     fn animal_class_train() -> Self;
     fn animal_class_test() -> Self;
@@ -68,14 +71,6 @@ impl<B: Backend> ClassificationBatcher<B> {
 
 impl<B: Backend> Batcher<ImageDatasetItem, ClassificationBatch<B>> for ClassificationBatcher<B> {
     fn batch(&self, items: Vec<ImageDatasetItem>) -> ClassificationBatch<B> {
-        fn image_as_vec_u8(item: ImageDatasetItem) -> Vec<u8> {
-            // Convert Vec<PixelDepth> to Vec<u8> (we know that CIFAR images are u8)
-            item.image
-                .into_iter()
-                .map(|p: PixelDepth| -> u8 { p.try_into().unwrap() })
-                .collect::<Vec<u8>>()
-        }
-
         let targets = items
             .iter()
             .map(|item| {
@@ -93,7 +88,7 @@ impl<B: Backend> Batcher<ImageDatasetItem, ClassificationBatch<B>> for Classific
 
         let images = items
             .into_iter()
-            .map(|item| TensorData::new(image_as_vec_u8(item), Shape::new([32, 32, 3])))
+            .map(|item| TensorData::new(image_as_vec_u8(item), Shape::new([SIDE_LENGTH as usize, SIDE_LENGTH as usize, 3])))
             .map(|data| {
                 Tensor::<B, 3>::from_data(data.convert::<B::FloatElem>(), &self.device)
                     // permute(2, 0, 1)
@@ -114,6 +109,13 @@ impl<B: Backend> Batcher<ImageDatasetItem, ClassificationBatch<B>> for Classific
 
 pub fn compress(pixel: u8) -> f32 {
     pixel as f32 / 255.0
+}
+
+fn image_as_vec_u8(item: ImageDatasetItem) -> Vec<u8> {
+    item.image
+        .into_iter()
+        .map(|p: PixelDepth| -> u8 { p.try_into().unwrap() })
+        .collect::<Vec<u8>>()
 }
 
 /// Used to calculate the MEAN and STD of the training dataset, to be used for dataset normalization
