@@ -1,15 +1,15 @@
 // Data folder E:\Dev\Datasets\AnimalClassificationX4\Data
 
+use std::ops::AddAssign;
 use burn::data::dataloader::batcher::Batcher;
 use burn::data::dataset::vision::{Annotation, ImageDatasetItem, ImageFolderDataset, PixelDepth};
 use burn::data::dataset::Dataset;
 use burn::prelude::{Backend, ElementConversion, Int, Shape, TensorData};
 use burn::tensor::Tensor;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use std::ops::AddAssign;
 use std::sync::{Arc, Mutex};
 
-pub const SIDE_LENGTH: u32 = 242;
+pub const SIDE_LENGTH: u32 = 32;
 pub const ARTIFACT_DIR: &str = "/tmp/animal-classifier";
 
 pub trait AnimalClassDataset {
@@ -27,8 +27,8 @@ impl AnimalClassDataset for ImageFolderDataset {
     }
 }
 
-const MEAN: [f32; 3] = [0.5220482561626244, 0.5019579786581502, 0.4202613831747602];
-const STD: [f32; 3] = [0.49951366, 0.49999616, 0.4936008];
+const MEAN: [f32; 3] = [0.5083495620, 0.5061350946, 0.4047361527];
+const STD: [f32; 3] = [0.24238577, 0.2346787, 0.24155393];
 
 #[derive(Clone)]
 pub struct Normalizer<B: Backend> {
@@ -164,9 +164,37 @@ pub fn calculate_mean() {
     let g_mean = g_sum.lock().unwrap().clone() / count as f64;
     let b_mean = b_sum.lock().unwrap().clone() / count as f64;
 
-    let std_r = f32::sqrt(((r_mean) - (r_mean * r_mean)) as f32);
-    let std_g = f32::sqrt(((g_mean) - (g_mean * g_mean)) as f32);
-    let std_b = f32::sqrt(((b_mean) - (b_mean * b_mean)) as f32);
+    let r_sum_std = Arc::new(Mutex::new(0.0f64));
+    let g_sum_std = Arc::new(Mutex::new(0.0f64));
+    let b_sum_std = Arc::new(Mutex::new(0.0f64));
+
+    (0..data.len()).into_par_iter().for_each(|i| {
+        let item = data.get(i).unwrap();
+        let image = item.image;
+        let mut r_s = 0.0f64;
+        let mut g_s = 0.0f64;
+        let mut b_s = 0.0f64;
+
+        for i in 0..image.len() {
+            if let PixelDepth::U8(u) = image[i] {
+                if i % 3 == 0 {
+                    r_s += (compress(u) as f64 - r_mean).powi(2);
+                } else if i % 3 == 1 {
+                    g_s += (compress(u) as f64 - g_mean).powi(2);
+                } else {
+                    b_s += (compress(u) as f64 - b_mean).powi(2);
+                }
+            }
+        }
+
+        r_sum_std.lock().unwrap().add_assign(r_s);
+        g_sum_std.lock().unwrap().add_assign(g_s);
+        b_sum_std.lock().unwrap().add_assign(b_s);
+    });
+
+    let std_r = f32::sqrt((r_sum_std.lock().unwrap().clone() / count as f64) as f32);
+    let std_g = f32::sqrt((g_sum_std.lock().unwrap().clone() / count as f64) as f32);
+    let std_b = f32::sqrt((b_sum_std.lock().unwrap().clone() / count as f64) as f32);
 
     println!("Mean: [{}, {}, {}]", r_mean, g_mean, b_mean);
     println!("Std: [{}, {}, {}]", std_r, std_g, std_b);

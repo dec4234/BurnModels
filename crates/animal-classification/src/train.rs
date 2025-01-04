@@ -10,6 +10,11 @@ use burn::tensor::backend::AutodiffBackend;
 use burn::train::metric::{AccuracyMetric, CpuUse, CudaMetric, LossMetric};
 use burn::train::LearnerBuilder;
 use std::time::Instant;
+use burn::data::dataset::transform::ShuffledDataset;
+use burn::lr_scheduler::exponential::ExponentialLrSchedulerConfig;
+use burn::lr_scheduler::linear::LinearLrSchedulerConfig;
+use rand::prelude::StdRng;
+use rand::{thread_rng, SeedableRng};
 
 fn create_artifact_dir(artifact_dir: &str) {
 	// Remove existing artifacts before to get an accurate learner summary
@@ -20,15 +25,15 @@ fn create_artifact_dir(artifact_dir: &str) {
 #[derive(Config)]
 pub struct TrainingConfig {
 	pub optimizer: AdamConfig,
-	#[config(default = 30)]
+	#[config(default = 3)]
 	pub num_epochs: usize,
-	#[config(default = 128)]
+	#[config(default = 8)]
 	pub batch_size: usize,
 	#[config(default = 4)]
 	pub num_workers: usize,
 	#[config(default = 42)]
 	pub seed: u64,
-	#[config(default = 0.02)]
+	#[config(default = 0.01)]
 	pub learning_rate: f64,
 }
 
@@ -49,13 +54,13 @@ pub fn train_run<B: AutodiffBackend>(config: TrainingConfig, device: B::Device) 
 		.batch_size(config.batch_size)
 		.shuffle(config.seed)
 		.num_workers(config.num_workers)
-		.build(ImageFolderDataset::animal_class_train());
+		.build(ShuffledDataset::new(ImageFolderDataset::animal_class_train(), &mut StdRng::from_rng(thread_rng()).unwrap()));
 
 	// NOTE: we use the CIFAR-10 test set as validation for demonstration purposes
 	let dataloader_test = DataLoaderBuilder::new(batcher_valid)
 		.batch_size(config.batch_size)
 		.num_workers(config.num_workers)
-		.build(ImageFolderDataset::animal_class_test());
+		.build(ShuffledDataset::new(ImageFolderDataset::animal_class_test(), &mut StdRng::from_rng(thread_rng()).unwrap()));
 
 	// Learner config
 	let learner = LearnerBuilder::new(ARTIFACT_DIR)
@@ -69,23 +74,21 @@ pub fn train_run<B: AutodiffBackend>(config: TrainingConfig, device: B::Device) 
 		.metric_train(CpuUse::new())
 
 		.with_file_checkpointer(CompactRecorder::new())
-
-
-
+		
 		.devices(vec![device.clone()])
 		.num_epochs(config.num_epochs)
 		.summary()
 		.build(
 			AnimalClassConfig::new().init(&device),
 			config.optimizer.init(),
-			config.learning_rate,
+			0.01,
 		);
 
 	// Training
 	let now = Instant::now();
 	let model_trained = learner.fit(dataloader_train, dataloader_test);
 	let elapsed = now.elapsed().as_secs();
-	println!("Training completed in {}m{}s", (elapsed / 60), elapsed % 60);
+	println!("Training completed in {}m{}s", elapsed / 60, elapsed % 60);
 
 	model_trained
 		.save_file(format!("{ARTIFACT_DIR}/model"), &CompactRecorder::new())

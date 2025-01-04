@@ -9,3 +9,4 @@ flate2 = {version = "1.0.35", features = ["default"]}
 tar = "0.4.43"
 tch = {version = "0.15.0", features = ["download-libtorch"]}
 rand = {version = "0.8.5", features = ["default"]}
+rayon = "1.10.0"

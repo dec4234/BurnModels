@@ -1,10 +1,10 @@
+use crate::data::ClassificationBatcher;
+use crate::model::{AnimalClassConfig, AnimalClassModel};
 use burn::data::dataloader::batcher::Batcher;
 use burn::data::dataset::vision::{Annotation, ImageDatasetItem};
 use burn::module::Module;
 use burn::prelude::Backend;
 use burn::record::{CompactRecorder, Recorder};
-use crate::data::ClassificationBatcher;
-use crate::model::{AnimalClassConfig, AnimalClassModel, NUM_CLASSES};
 
 pub fn infer_run<B: Backend>(artifact_dir: &str, device: B::Device, item: ImageDatasetItem) {
 	let record = CompactRecorder::new()

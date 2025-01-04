@@ -745,6 +745,7 @@ dependencies = [
  "burn",
  "flate2",
  "rand",
+ "rayon",
  "tar",
  "tch",
 ]

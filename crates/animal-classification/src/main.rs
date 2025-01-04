@@ -2,7 +2,6 @@ use crate::data::{AnimalClassDataset, ARTIFACT_DIR};
 use burn::data::dataset::vision::ImageFolderDataset;
 use burn::data::dataset::Dataset;
 use image::{DynamicImage, GenericImageView};
-use rand::seq::IteratorRandom;
 use std::path::PathBuf;
 use std::time::SystemTime;
 use burn::backend::Autodiff;
@@ -17,7 +16,7 @@ mod train;
 mod infer;
 
 fn main() {
-    
+    train();
 }
 
 fn train() {
@@ -40,8 +39,8 @@ fn infer() {
     let time = SystemTime::now();
 
     let device = LibTorchDevice::Cuda(0);
-
-    let item = ImageFolderDataset::animal_class_test().get(0).unwrap();
+    
+    let item = ImageFolderDataset::animal_class_test().get(325).unwrap();
     infer::infer_run::<Autodiff<LibTorch>>(ARTIFACT_DIR, device, item);
     
     println!("Time to train: {}", time.elapsed().unwrap().as_millis() as f64 / 1000.0);

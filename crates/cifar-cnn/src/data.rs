@@ -1,7 +1,13 @@
+use rayon::iter::ParallelIterator;
+use std::ops::AddAssign;
+use std::sync::{Arc, Mutex};
 use burn::data::dataloader::batcher::Batcher;
-use burn::data::dataset::vision::{Annotation, ImageDatasetItem, PixelDepth};
+use burn::data::dataset::Dataset;
+use burn::data::dataset::vision::{Annotation, ImageDatasetItem, ImageFolderDataset, PixelDepth};
 use burn::prelude::Backend;
 use burn::tensor::{ElementConversion, Int, Shape, Tensor, TensorData};
+use rayon::iter::IntoParallelIterator;
+use crate::dataset::CIFAR10Loader;
 
 const MEAN: [f32; 3] = [0.4914, 0.48216, 0.44653];
 const STD: [f32; 3] = [0.24703, 0.24349, 0.26159];
@@ -97,4 +103,97 @@ impl<B: Backend> Batcher<ImageDatasetItem, ClassificationBatch<B>> for Classific
 			images_path,
 		}
 	}
+}
+
+pub fn compress(pixel: u8) -> f32 {
+	pixel as f32 / 255.0
+}
+
+// Outputs from this match the provided mean and STD values from the example
+#[ignore]
+#[test]
+pub fn calculate_mean() {
+	println!("Calculating mean and std...");
+
+	let data = ImageFolderDataset::cifar10_train();
+	let r_sum = Arc::new(Mutex::new(0.0f64));
+	let g_sum = Arc::new(Mutex::new(0.0f64));
+	let b_sum = Arc::new(Mutex::new(0.0f64));
+	let count = Arc::new(Mutex::new(0));
+
+	(0..data.len()).into_par_iter().for_each(|i| {
+		let item = data.get(i).unwrap();
+		let image = item.image;
+		let mut r = 0.0f64;
+		let mut g = 0.0f64;
+		let mut b = 0.0f64;
+		let mut c = 0;
+
+		for i in 0..image.len() {
+			if let PixelDepth::U8(u) = image[i] {
+				if i % 3 == 0 {
+					r += compress(u) as f64;
+					c += 1;
+				} else if i % 3 == 1 {
+					g += compress(u) as f64;
+				} else {
+					b += compress(u) as f64;
+				}
+			}
+		}
+
+		count.lock().unwrap().add_assign(c);
+
+		r_sum.lock().unwrap().add_assign(r);
+		g_sum.lock().unwrap().add_assign(g);
+		b_sum.lock().unwrap().add_assign(b);
+	});
+
+	let count = count.lock().unwrap().clone();
+
+	let r_mean = r_sum.lock().unwrap().clone() / count as f64;
+	let g_mean = g_sum.lock().unwrap().clone() / count as f64;
+	let b_mean = b_sum.lock().unwrap().clone() / count as f64;
+
+	let r_sum_std = Arc::new(Mutex::new(0.0f64));
+	let g_sum_std = Arc::new(Mutex::new(0.0f64));
+	let b_sum_std = Arc::new(Mutex::new(0.0f64));
+
+	(0..data.len()).into_par_iter().for_each(|i| {
+		let item = data.get(i).unwrap();
+		let image = item.image;
+		let mut r_s = 0.0f64;
+		let mut g_s = 0.0f64;
+		let mut b_s = 0.0f64;
+
+		for i in 0..image.len() {
+			if let PixelDepth::U8(u) = image[i] {
+				if i % 3 == 0 {
+					r_s += (compress(u) as f64 - r_mean).powi(2);
+				} else if i % 3 == 1 {
+					g_s += (compress(u) as f64 - g_mean).powi(2);
+				} else {
+					b_s += (compress(u) as f64 - b_mean).powi(2);
+				}
+			}
+		}
+
+		r_sum_std.lock().unwrap().add_assign(r_s);
+		g_sum_std.lock().unwrap().add_assign(g_s);
+		b_sum_std.lock().unwrap().add_assign(b_s);
+	});
+
+	let std_r = f32::sqrt((r_sum_std.lock().unwrap().clone() / count as f64) as f32);
+	let std_g = f32::sqrt((g_sum_std.lock().unwrap().clone() / count as f64) as f32);
+	let std_b = f32::sqrt((b_sum_std.lock().unwrap().clone() / count as f64) as f32);
+
+	println!("Mean: [{}, {}, {}]", r_mean, g_mean, b_mean);
+	println!("Std: [{}, {}, {}]", std_r, std_g, std_b);
+	println!("Count: {}", count);
+	println!(
+		"Sums: [{}, {}, {}]",
+		r_sum.lock().unwrap(),
+		g_sum.lock().unwrap(),
+		b_sum.lock().unwrap()
+	);
 }
