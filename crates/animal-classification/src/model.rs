@@ -1,20 +1,18 @@
-use crate::data::ClassificationBatch;
 use burn::config::Config;
 use burn::module::Module;
 use burn::nn::conv::{Conv2d, Conv2dConfig};
-use burn::nn::loss::CrossEntropyLossConfig;
 use burn::nn::pool::{MaxPool2d, MaxPool2dConfig};
 use burn::nn::{Dropout, DropoutConfig, Linear, LinearConfig, PaddingConfig2d, Relu};
-use burn::prelude::{Backend, Int, Tensor};
+use burn::prelude::{Backend, Tensor};
 use burn::tensor::backend::AutodiffBackend;
-use burn::train::{ClassificationOutput, TrainOutput, TrainStep, ValidStep};
 
 pub const NUM_CLASSES: usize = 4;
 
 #[derive(Debug, Module)]
 pub struct AnimalClassModel<B: Backend> {
 	activation: Relu,
-	dropout: Dropout,
+	con_dropout: Dropout,
+	fcn_dropout: Dropout,
 	pool: MaxPool2d,
 	conv1: Conv2d<B>,
 	conv2: Conv2d<B>,
@@ -33,52 +31,29 @@ impl <B: Backend> AnimalClassModel<B> {
 		let x = self.conv2.forward(x);
 		let x = self.activation.forward(x);
 		let x = self.pool.forward(x);
-		let x = self.dropout.forward(x);
+		let x = self.con_dropout.forward(x);
 
 		let x = self.conv3.forward(x);
 		let x = self.activation.forward(x);
 		let x = self.conv4.forward(x);
 		let x = self.activation.forward(x);
 		let x = self.pool.forward(x);
-		let x = self.dropout.forward(x);
+		let x = self.con_dropout.forward(x);
 
 		let x = self.conv5.forward(x);
 		let x = self.activation.forward(x);
 		let x = self.conv6.forward(x);
 		let x = self.activation.forward(x);
 		let x = self.pool.forward(x);
-		let x = self.dropout.forward(x);
+		let x = self.con_dropout.forward(x);
 
 		let x = x.flatten(1, 3);
 
 		let x = self.fc1.forward(x);
 		let x = self.activation.forward(x);
-		let x = self.dropout.forward(x);
+		let x = self.fcn_dropout.forward(x);
 
 		self.fc2.forward(x)
-	}
-
-	pub fn forward_classification(&self, images: Tensor<B, 4>, targets: Tensor<B, 1, Int>) -> ClassificationOutput<B> {
-		let output = self.forward(images);
-
-		let loss = CrossEntropyLossConfig::new().init(&output.device())
-			.forward(output.clone(), targets.clone());
-
-		ClassificationOutput::new(loss, output, targets)
-	}
-}
-
-impl <B: AutodiffBackend> TrainStep<ClassificationBatch<B>, ClassificationOutput<B>> for AnimalClassModel<B> {
-	fn step(&self, batch: ClassificationBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
-		let item = self.forward_classification(batch.images, batch.targets);
-
-		TrainOutput::new(self, item.loss.backward(), item)
-	}
-}
-
-impl<B: Backend> ValidStep<ClassificationBatch<B>, ClassificationOutput<B>> for AnimalClassModel<B> {
-	fn step(&self, batch: ClassificationBatch<B>) -> ClassificationOutput<B> {
-		self.forward_classification(batch.images, batch.targets)
 	}
 }
 
@@ -118,11 +93,13 @@ impl AnimalClassConfig {
 		let fc1 = LinearConfig::new(2048, 128).init(device);
 		let fc2 = LinearConfig::new(128, self.num_classes).init(device);
 
-		let dropout = DropoutConfig::new(0.3).init();
+		let con_dropout = DropoutConfig::new(0.3).init();
+		let fcn_dropout = DropoutConfig::new(0.3).init();
 
 		AnimalClassModel {
 			activation: Relu::new(),
-			dropout,
+			con_dropout,
+			fcn_dropout,
 			pool,
 			conv1,
 			conv2,
