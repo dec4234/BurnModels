@@ -1,0 +1,15 @@
+[package]
+name = "resnet"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+simple_logger = "5.0.0"
+log = "0.4.22"
+burn = {version = "0.15.0", features = ["default", "vision", "train","tch", "metrics", "network", "autodiff"]}
+burn-import = {version = "0.15.0", features = ["default", "pytorch"]}
+burn-tch = {version = "0.15.0", features = ["default"]}
+tch = {version = "0.15.0", features = ["download-libtorch"]}
+image = {version = "0.25.5", features = ["default"]}
+thiserror = "2.0.9"
+dirs = "5.0.1"

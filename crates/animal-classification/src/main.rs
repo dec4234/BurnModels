@@ -5,7 +5,7 @@ use image::{DynamicImage, GenericImageView};
 use std::path::PathBuf;
 use std::time::SystemTime;
 use burn::backend::Autodiff;
-use burn::optim::{AdamConfig, SgdConfig};
+use burn::optim::AdamConfig;
 use burn_tch::{LibTorch, LibTorchDevice};
 use crate::train::TrainingConfig;
 
@@ -27,7 +27,7 @@ fn train() {
 
     let device = LibTorchDevice::Cuda(0);
 
-    train::train::<Autodiff<LibTorch>>(TrainingConfig::new(SgdConfig::new()), device);
+    train::train_run::<Autodiff<LibTorch>>(TrainingConfig::new(AdamConfig::new()), device);
 
     println!("Time to train: {}", time.elapsed().unwrap().as_millis() as f64 / 1000.0);
 }
