@@ -1,0 +1,18 @@
+[package]
+name = "yolox"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+simple_logger = "5.0.0"
+log = "0.4.22"
+burn = {version = "0.15.0", features = ["default", "vision", "train","tch", "metrics", "network", "autodiff"]}
+burn-import = {version = "0.15.0", features = ["default", "pytorch"]}
+burn-tch = {version = "0.15.0", features = ["default"]}
+burn-train = {version = "0.16.0", features = ["metrics"]}
+tch = {version = "0.15.0", features = ["download-libtorch"]}
+image = {version = "0.25.5", features = ["default"]}
+thiserror = "2.0.9"
+itertools = "0.13.0"
+dirs = "5.0.1"
+rand = "0.8.5"
